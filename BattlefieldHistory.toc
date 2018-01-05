@@ -1,0 +1,16 @@
+## Interface: 50400
+## Title: Battlefield History
+## Version: 1.1.180101
+## Notes: Player battlefield stats
+## Author: Cyprias
+## SavedVariables: BattlefieldHistory_DB
+## OptionalDeps: LibStub, CallbackHandler-1.0, Ace3
+## LoadManagers: AddonLoader
+## X-LoadOn-Always: true
+
+Libs\embeds.xml
+
+core.lua
+options.lua
+
+
