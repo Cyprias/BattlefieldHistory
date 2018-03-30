@@ -6,7 +6,7 @@
 
 
 local folder, core = ...
-_G._FH = core
+_G._BH = core
 
 core.title		= GetAddOnMetadata(folder, "Title")
 core.version	= GetAddOnMetadata(folder, "Version")
@@ -34,6 +34,13 @@ do
 		self:RegisterChatCommand("bh", "ChatCommand");
 		
 		core.db.realm.battlefieldScores = core.db.realm.battlefieldScores or {};
+
+		-- Reset battlefieldScores if no version property in db. Changing how entires are saved.
+		if (type(self.db.global.version) == "nil") then
+			self.db.realm.battlefieldScores = {};
+		end
+		
+		self.db.global.version = core.version;
 	end
 end
 
@@ -42,7 +49,8 @@ function core:ChatCommand(input)
 	if not input or input:trim() == "" then
 		self:OpenOptionsFrame()
 	elseif input:find("score") then
-		core:ShowScores();
+		core:Debug("Broken");
+		--core:ShowScores();
 	end
 end
 
@@ -66,6 +74,8 @@ do
 
 		self:RegisterBucketEvent("UPDATE_BATTLEFIELD_STATUS", 1, "BUCKET_BATTLEFIELD_STATUS")
 		--self:RegisterEvent("UPDATE_BATTLEFIELD_STATUS")
+		
+		self:RegisterEvent("UPDATE_BATTLEFIELD_SCORE");
 	end
 end
 
@@ -173,16 +183,6 @@ do
 end
 
 do
-	function core:BUCKET_BATTLEFIELD_STATUS(...)
-		local battlefieldStatus = core:GetBattlefieldStatus();
-
-		core:ProcessBattlefieldStatusChange( {
-			battlefieldStatus=battlefieldStatus 
-		});
-	end
-end
-
-do
 	local GetMaxBattlefieldID = GetMaxBattlefieldID;
 	local GetBattlefieldStatus = GetBattlefieldStatus;
 	function core:GetBattlefieldStatus()
@@ -208,50 +208,62 @@ do
 	local GetBattlefieldWinner = GetBattlefieldWinner;
 	local GetBattlefieldInstanceRunTime = GetBattlefieldInstanceRunTime;
 	
+	local roundScores;
+	
+	local function onScores(params)
+		core:Debug("<ProcessBattlefieldStatusChange|onScores>");
+		
+		local forward = params.forward;
+		local roundScores = params.roundScores;
+
+		local mapName = forward.mapName;
+		local battlefieldWinner = forward.battlefieldWinner;
+		local inArena = forward.inArena;
+		local runtime = forward.runtime;
+
+		core.Debug("ProcessBattlefieldStatusChange", "battlefieldWinner: " .. tostring(battlefieldWinner) .. ", inArena: " .. tostring(inArena));
+		
+		if ( not inArena and battlefieldWinner ) then
+
+			-- Check if anyone quit before end of the round.
+			local scores = core:GetBattlefieldScores();
+			for name, score in pairs(roundScores) do
+				roundScores[name].quit = (type(scores[ name ]) == "nil");
+			end
+			
+			--local scores = core:GetBattlefieldScores();
+			-- Pass it to save function.
+			core:RecordBattlefieldScores({
+				--scores = scores,
+				scores = roundScores,
+				mapName = mapName,
+				runtime = runtime,
+				battlefieldWinner = battlefieldWinner,
+			});
+		end
+	end
+	
 	function core:ProcessBattlefieldStatusChange(params)
 		core.Debug("ProcessBattlefieldStatusChange", "<ProcessBattlefieldStatusChange>");
-		local battlefieldStatus     = params.battlefieldStatus;
+		local battlefieldStatus     = params.battlefieldStatus or {[1]={status="active"}};
 		local inArena               = params.inArena or IsActiveBattlefieldArena();
 		local battlefieldWinner     = params.battlefieldWinner or GetBattlefieldWinner();
 		local runtime               = params.runtime or GetBattlefieldInstanceRunTime();
-		
+
 		local s;
 		for i = 1, table.getn(battlefieldStatus) do 
 			s = battlefieldStatus[i];
-			--core:echo("i: " .. tostring(i) .. ", status: " .. tostring(s.status));
-			if ( s.status == "active" ) then
-				local inArena = IsActiveBattlefieldArena();
-				core.Debug("ProcessBattlefieldStatusChange", "battlefieldWinner: " .. tostring(battlefieldWinner) .. ", inArena: " .. tostring(inArena));
-				if ( not inArena and battlefieldWinner ) then
-					--[[
-					function onBattlefieldScoreData() 
-						core.Debug("ProcessBattlefieldStatusChange", "got scores...");
-						--local str = SecondsToTime(runtime/1000, true);
-						--core.echo("runtime: " .. runtime .. ", " .. str);
-						
-						-- Get battlefield scores.
-						local scores = core:GetBattlefieldScores();
-						-- Pass it to save function.
-						core:RecordBattlefieldScores({
-							scores = scores,
-							mapName = s.mapName,
-							runtime = runtime,
-							battlefieldWinner = battlefieldWinner,
-						});
-					end
-					
-					--core.echo("Requesting battlefield scores...");
-					core:RequestBattlefieldScoreData(nil, onBattlefieldScoreData);
-					]]
-					local scores = core:GetBattlefieldScores();
-					-- Pass it to save function.
-					core:RecordBattlefieldScores({
-						scores = scores,
+			core:echo("i: " .. tostring(i) .. ", status: " .. tostring(s.status));
+			if ( s.status == "active") then
+				-- Request fresh scores.
+				core:RequestBattlefieldScoreData({
+					forward = {
 						mapName = s.mapName,
-						runtime = runtime,
 						battlefieldWinner = battlefieldWinner,
-					});
-				end
+						inArena = inArena,
+						runtime = runtime,
+					}
+				}, onScores);
 			end
 		end
 	end
@@ -260,8 +272,30 @@ end
 do
 	local RequestBattlefieldScoreData = RequestBattlefieldScoreData;
 	
+	local roundScores;
+	local function UpdateRoundScores()
+		core:Debug("<UpdateRoundScores>");
+		roundScores = roundScores or {};
+		local scores = core:GetBattlefieldScores();
+		local playerCount = 0;
+		for name, score in pairs(scores) do
+			roundScores[ name ] = roundScores[ name ] or {};
+			for k, v in pairs(score) do
+				roundScores[ name ][k] = v;
+			end
+			roundScores[ name ].firstSeen = roundScores[ name ].firstSeen or GetTime(); -- First seen.
+			roundScores[ name ].lastSeen = GetTime();
+			
+			playerCount = playerCount + 1;
+		end
+		core:Debug("playerCount: " .. playerCount);
+	end
+	
 	function core:RequestBattlefieldScoreData(params, callback)
 		core.Debug("RequestBattlefieldScoreData", "<RequestBattlefieldScoreData>");
+		
+		--local mapName = params and params.mapName;
+		local forward = params.forward;
 		
 		local f = CreateFrame("Frame");
 	
@@ -277,8 +311,14 @@ do
 				
 				core:CancelTimer(tid);
 				
+				UpdateRoundScores();
+				
 				-- Call our callback.
-				callback();
+				callback({
+					fresh = true,
+					forward = forward,
+					roundScores = roundScores,
+				});
 			end
 		end
 		f:SetScript("OnEvent", onEvent)
@@ -292,7 +332,11 @@ do
 				f:SetScript("OnEvent", nil);
 				f = nil;
 			
-				callback();
+				callback({
+					fresh = false,
+					forward = forward,
+					roundScores = roundScores,
+				});
 			end
 		end
 		
@@ -301,6 +345,39 @@ do
 		
 		-- Request the info from the server.
 		RequestBattlefieldScoreData();
+	end
+	
+	
+	-- Reset the roundScores table when we're not in a BG.
+	function core:BUCKET_BATTLEFIELD_STATUS(...)--	/script _BH:BUCKET_BATTLEFIELD_STATUS()
+		local battlefieldStatus = core:GetBattlefieldStatus();
+		local inBG = false;
+		local s;
+		for i = 1, table.getn(battlefieldStatus) do 
+			s = battlefieldStatus[i];
+			if ( s.status == "active") then
+				inBG = true;
+				--UpdateRoundScores();
+				break;
+			end
+		end
+		
+		core:Debug("inBG: " .. tostring(inBG));
+		
+		if (inBG == true) then
+			core:ProcessBattlefieldStatusChange( {
+				battlefieldStatus=battlefieldStatus 
+			});
+		elseif (not inBG and roundScores) then
+			roundScores = nil;
+			core:Debug("Cleared roundScores.");
+		end
+
+	end
+
+	-- Refresh the round scores whenever event fires.
+	function core:UPDATE_BATTLEFIELD_SCORE(...)
+		UpdateRoundScores();
 	end
 end
 
@@ -355,7 +432,8 @@ do
 				playerData[text] = columnData;
 			end
 
-			table.insert(scores, playerData)
+			--table.insert(scores, playerData)
+			scores[name] = playerData;
 		end
 		return scores;
 	end	
@@ -372,63 +450,49 @@ do
 end
 
 do
-	local time = time;
+	local time = time; -- time() returns unixtime.
 	local GetTime = GetTime;
 	
 	local lastSaveTime = 0;
 	function core:RecordBattlefieldScores(params)
-		core.Debug("RecordBattlefieldScores","<RecordBattlefieldScores>");
+		core.echo("RecordBattlefieldScores","<RecordBattlefieldScores>");
 		local scores = params.scores;
-		local mapName = params.mapName;
-		local runtime = params.runtime;
-		local battlefieldWinner = params.battlefieldWinner;
-		local uuid = params.uuid or core:uuid();
-		local now = params.now or time();
-		
 		local elapsed = GetTime() - lastSaveTime;
 		core.Debug("RecordBattlefieldScores", "elapsed: " .. elapsed);
 		--core.echo("battlefieldWinner: " .. battlefieldWinner);
 		
 		
 		if (elapsed < 30) then
-			core.Debug("RecordBattlefieldScores","It's only been " .. elapsed .. " is our last record save.");
+			core:Debug("It's only been " .. elapsed .. " is our last record save.");
 			return;
 		end
 		
 		self.db.realm.battlefieldScores = self.db.realm.battlefieldScores or {};
 		
-		-- Get total healing counts.
-		local totalTeamHealing = {};
-		local totalTeamDamage = {};
-		local teamSize = {};
+		local payload = {};
+		payload.mapName             = params.mapName;
+		payload.runtime             = params.runtime;
+		payload.battlefieldWinner   = params.battlefieldWinner;
+		payload.time                = params.time or time();
+		payload.scores              = scores;
 
-		local s;
-		for i = 1, table.getn(scores) do 
-			s = scores[i];
-
-			teamSize[ s.faction ] = teamSize[ s.faction ] or 0;
-			teamSize[ s.faction ] = teamSize[ s.faction ] + 1;
-		end
-
-		for i = 1, table.getn(scores) do 
-			s = scores[i];
+		
+		payload.totalDamageDone = 0;
+		payload.totalHealingDone = 0;
+		for name, score in pairs(scores) do
+			if (score.damageDone) then
+				payload.totalDamageDone = payload.totalDamageDone + score.damageDone;
+			end
+			if (score.healingDone) then
+				payload.totalHealingDone = payload.totalHealingDone + score.healingDone;
+			end
 			
-			s.classToken = nil;
-			
-			s.mapName = mapName;
-			s.runtime = runtime;
-			s.battlefieldWinner = (battlefieldWinner == s.faction);
-			--core.echo(s.name .. " battlefieldWinner: " .. tostring(s.battlefieldWinner) .. ", faction: " .. tostring(s.faction));
-			s.uuid = uuid; -- unique to that round.
-			s.time = now;
-
-			s.teamSize = teamSize[ s.faction ];
-			s.roundSize = table.getn(scores);
-			
-			self.db.realm.battlefieldScores[ s.name ] = self.db.realm.battlefieldScores[ s.name ] or {};
-			table.insert(self.db.realm.battlefieldScores[ s.name ], core:Serialize(s))
+			score.playTime = score.lastSeen - score.firstSeen;
+			core.echo("name: " .. tostring(name) .. " firstSeen: " .. tostring(score.firstSeen) .. ", lastSeen: " .. tostring(score.lastSeen) .. " playTime: " .. tostring(score.playTime) .. ", quit: " .. tostring(score.quit));
 		end
 		
+		
+		table.insert(self.db.realm.battlefieldScores, core:Serialize(payload));
 		core.echo("Saved battlefield stats.");
 		lastSaveTime = GetTime();
 	end
