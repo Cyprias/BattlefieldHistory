@@ -33,11 +33,11 @@ do
 		
 		self:RegisterChatCommand("bh", "ChatCommand");
 		
-		core.db.realm.battlefieldScores = core.db.realm.battlefieldScores or {};
+		core.db.realm.battlefieldRounds = core.db.realm.battlefieldRounds or {};
 
 		-- Reset battlefieldScores if no version property in db. Changing how entires are saved.
 		if (type(self.db.global.version) == "nil") then
-			self.db.realm.battlefieldScores = {};
+			self.db.realm.battlefieldRounds = {};
 		end
 		
 		self.db.global.version = core.version;
@@ -467,7 +467,7 @@ do
 			return;
 		end
 		
-		self.db.realm.battlefieldScores = self.db.realm.battlefieldScores or {};
+		self.db.realm.battlefieldRounds = self.db.realm.battlefieldRounds or {};
 		
 		local payload = {};
 		payload.mapName             = params.mapName;
@@ -492,7 +492,7 @@ do
 		end
 		
 		
-		table.insert(self.db.realm.battlefieldScores, core:Serialize(payload));
+		table.insert(self.db.realm.battlefieldRounds, core:Serialize(payload));
 		core.echo("Saved battlefield stats.");
 		lastSaveTime = GetTime();
 	end
@@ -766,25 +766,45 @@ do
 		end
 		
 		--local players = core:GetBattlefieldPlayers();
+		
+		local allRounds = core:GetRounds();
+		
 		local players = {};
 
-		for playerName, scores in pairs(core.db.realm.battlefieldScores) do 
-			table.insert(players, {
-				name = playerName
-			})
+		--for playerName, scores in pairs(core.db.realm.battlefieldRounds) do 
+		local rounds = core.db.realm.battlefieldRounds;
+		local round;
+		for i = 1, table.getn(allRounds) do 
+			round = allRounds[i];
+			for name, score in pairs(round.scores) do
+				--core.echo("name: " .. tostring(name));
+				table.insert(players, {
+					name = name
+				})
+			end
 		end
 		
 		shownData = RefreshTable({
 			scrollTable	    = container.allST,
 			players         = players,
+			allRounds       = allRounds,
 		})
 	end
 
 	--for i = 1, table.getn(scores) do 
 	
+	function core:GetNumKeys(object) 
+		local num = 0;
+		for k, v in pairs(object) do
+			num = num + 1;
+		end
+		return num;
+	end
+	
 	function core:GetPlayerBattlefieldStats(params)
 		local name = params.name;
-		local allRoundsScores = params.allRoundsScores;
+		local allRounds = params.allRounds;
+		--local allRoundsScores = params.allRoundsScores;
 		
 		local stats = {
 			rounds              = 0,
@@ -795,45 +815,41 @@ do
 			wins                = 0,
 		};
 		
-		if (core.db.realm.battlefieldScores[ name ]) then
-			local roundScores;
-			local scores = core.db.realm.battlefieldScores[name];
-			local success, score;
-			for i = 1, table.getn(scores) do 
-				--core.echo("playerName: " .. playerName ..", i: " .. i);
-				
-				success, score = core:Deserialize( scores[i] );
-				if (success) then
-					roundScores = allRoundsScores[ score.uuid ];
-					
-					--core.echo("faction: " .. tostring(score.faction));
-					stats.faction   = stats.faction or score.faction;
-					stats.rounds     = stats.rounds + 1;
-					
-					if (score.damageDone) then
-						local totalDamage = core:GetTotalRoundDamage( {scores=roundScores } );
-						stats.damagePercentage = stats.damagePercentage + (score.damageDone / totalDamage);
-						damageAverage = totalDamage / table.getn(roundScores);
-						
-						stats.damageModifier = stats.damageModifier + (score.damageDone / damageAverage);
-					end
+		local rounds = core:GetPlayerRounds({who=name, allRounds=allRounds});
+		--local playerScores = core:GetPlayerScores({who:who});
+		
+		local round;
+		local score;
+		local roundSize;
+		local average;
+		for i = 1, table.getn(rounds) do 
+			round = rounds[i];
+			score = round.scores[name];
+			roundSize = core:GetNumKeys(round.scores);
+			--core.debug("i: " .. i .. ", roundSize: " .. roundSize .. ", totalDamageDone: " .. round.totalDamageDone .. ", totalHealingDone: " .. round.totalHealingDone);
+			
+			stats.faction   = stats.faction or score.faction;
+			stats.rounds     = stats.rounds + 1;
 
-					if (score.healingDone) then
-						local totalHealing = core:GetTotalRoundHealing( {scores=roundScores } );
-						stats.healingPercentage = stats.healingPercentage + (score.healingDone / totalHealing);
-						healingAverage = totalHealing / table.getn(roundScores);
-						
-						stats.healingModifier = stats.healingModifier + (score.healingDone / healingAverage);
-					end
-					
-					if (score.battlefieldWinner == true) then
-						stats.wins = stats.wins + 1;
-					end
-				end
+			
+			if (score.damageDone > 0 and round.totalDamageDone > 0) then
+				
+				stats.damagePercentage = stats.damagePercentage + (score.damageDone / round.totalDamageDone);
+				average = round.totalDamageDone / roundSize;
+				stats.damageModifier = stats.damageModifier + (score.damageDone / average);
+			end
+
+			if (score.healingDone > 0 and round.totalHealingDone > 0) then
+				stats.healingPercentage = stats.healingPercentage + (score.healingDone / round.totalHealingDone);
+				average = round.totalHealingDone / roundSize;
+				stats.healingModifier = stats.healingModifier + (score.healingDone / average);
+			end
+
+			if (round.battlefieldWinner == score.faction) then
+				stats.wins = stats.wins + 1;
 			end
 		end
-		
-		
+
 		return stats;
 	end
 
@@ -841,7 +857,8 @@ do
 		local scrollTable = params.scrollTable;
 		local players = params.players;
 
-		local allRoundsScores = core:GetRoundsScores();
+		--local allRoundsScores = core:GetRounds();
+		local allRounds = params.allRounds or core:GetRounds();
 		
 		local playerData = {};
 		
@@ -849,7 +866,7 @@ do
 		--local playerNames = {};
 		for i = 1, table.getn(players) do 
 			p = players[i];
-			playerData[ p.name ] = core:GetPlayerBattlefieldStats({name=p.name, allRoundsScores=allRoundsScores});
+			playerData[ p.name ] = core:GetPlayerBattlefieldStats({name=p.name, allRounds=allRounds});
 			--core.echo("p.name: " .. tostring(p.name) .. ", p.faction: " .. tostring(p.faction) .. ", pd.faction: " .. tostring(playerData[ p.name ].faction));
 			--playerData[ p.name ].faction = p.faction or playerData[ p.name ].faction;
 			if (type(p.faction) == "number" and playerData[ p.name ].faction ~= p.faction) then
@@ -1029,19 +1046,19 @@ do
 end
 
 do
-	-- Return scores grouped by round uuid.
-	function core:GetRoundsScores()
+	-- Return scores
+	function core:GetRounds()
 		local rounds = {};
 		
-		local success, score;
-		for playerName, scores in pairs(core.db.realm.battlefieldScores) do 
-			for i = 1, table.getn(scores) do 
-				success, score = core:Deserialize( scores[i] );
-				if (success) then
-					rounds[ score.uuid ] = rounds[ score.uuid ] or {};
-					
-					table.insert(rounds[ score.uuid ], score)
-				end
+		--local rounds = core.db.realm.battlefieldRounds;
+		
+		local success, round;
+		for i = 1, table.getn(core.db.realm.battlefieldRounds) do 
+			success, round = core:Deserialize( core.db.realm.battlefieldRounds[i] );
+			if (success) then
+				--rounds[ score.uuid ] = rounds[ score.uuid ] or {};
+				--table.insert(rounds[ score.uuid ], score)
+				table.insert(rounds, round)
 			end
 		end
 		
@@ -1199,37 +1216,58 @@ do
 	
 end
 
+function core:GetPlayerRounds(params) 
+	local who = params.who;
+	local allRounds = params.allRounds or core:GetRounds();
+
+	local rounds = core.db.realm.battlefieldRounds;
+	
+	local playerRounds = {};
+	local success, round;
+	for i = 1, table.getn(allRounds) do 
+		round = allRounds[i];
+		if (round.scores[who]) then
+			table.insert(playerRounds, round);
+		end
+	end
+	
+	return playerRounds;
+end
+
+function core:GetPlayerScores(params) 
+	local who = params.who;
+	local allRounds = params.allRounds or core:GetRounds();
+	
+	--local rounds = core.db.realm.battlefieldRounds;
+	
+	local scores = {};
+	local success, round;
+	for i = 1, table.getn(allRounds) do 
+		round = allRounds[i];
+		if (round.scores[who]) then
+			table.insert(playerRounds, round.scores[who]);
+		end
+	end
+	
+	return scores;
+end
+
 function core:GetPlayerTeammates(params)
 	local who = params.who;
-	local allRoundsScores = core:GetRoundsScores();
-	
-	local scores = core.db.realm.battlefieldScores[ who ];
-	
+	--local allRoundsScores = core:GetRounds();
+
+	-- Figure out which rounds the player was in first.
+	local playerRounds = core:GetPlayerRounds({who=who});
+
+	-- Count the number of times other players in those rounds were seen.
 	local seenCounts = {};
-	
-	local success, score;
-	local roundScores;
-	local rs;
-	for i = 1, table.getn(scores) do 
-		success, score = core:Deserialize( scores[i] );
-		
-		if (success) then
-		
-			roundScores = allRoundsScores[ score.uuid ];
-			
-			--core.echo("roundScores: " .. core:dump_table(roundScores));
-			
-			--[[]]
-			for ii = 1, table.getn(roundScores) do 
-				rs = roundScores[ ii ];
-				seenCounts[ rs.name ] = seenCounts[ rs.name ] or {seen=0};
-				seenCounts[ rs.name ].seen = seenCounts[ rs.name ].seen + 1;
-				seenCounts[ rs.name ].faction = rs.faction;
-			end
-			
-		
+	for i = 1, table.getn(playerRounds) do 
+		round = playerRounds[i];
+		for name, score in pairs(round.scores) do
+			seenCounts[ name ] = seenCounts[ name ] or {seen=0};
+			seenCounts[ name ].seen = seenCounts[ name ].seen + 1;
+			seenCounts[ name ].faction = score.faction;
 		end
-		
 	end
 
 	return seenCounts;
