@@ -49,8 +49,7 @@ function core:ChatCommand(input)
 	if not input or input:trim() == "" then
 		self:OpenOptionsFrame()
 	elseif input:find("score") then
-		core:Debug("Broken");
-		--core:ShowScores();
+		core:ShowScores();
 	end
 end
 
@@ -253,7 +252,7 @@ do
 		local s;
 		for i = 1, table.getn(battlefieldStatus) do 
 			s = battlefieldStatus[i];
-			core:echo("i: " .. tostring(i) .. ", status: " .. tostring(s.status));
+			core:Debug("i: " .. tostring(i) .. ", status: " .. tostring(s.status));
 			if ( s.status == "active") then
 				-- Request fresh scores.
 				core:RequestBattlefieldScoreData({
@@ -295,7 +294,7 @@ do
 		core.Debug("RequestBattlefieldScoreData", "<RequestBattlefieldScoreData>");
 		
 		--local mapName = params and params.mapName;
-		local forward = params.forward;
+		local forward = params and params.forward;
 		
 		local f = CreateFrame("Frame");
 	
@@ -455,7 +454,6 @@ do
 	
 	local lastSaveTime = 0;
 	function core:RecordBattlefieldScores(params)
-		core.echo("RecordBattlefieldScores","<RecordBattlefieldScores>");
 		local scores = params.scores;
 		local elapsed = GetTime() - lastSaveTime;
 		core.Debug("RecordBattlefieldScores", "elapsed: " .. elapsed);
@@ -488,7 +486,7 @@ do
 			end
 			
 			score.playTime = score.lastSeen - score.firstSeen;
-			core.echo("name: " .. tostring(name) .. " firstSeen: " .. tostring(score.firstSeen) .. ", lastSeen: " .. tostring(score.lastSeen) .. " playTime: " .. tostring(score.playTime) .. ", quit: " .. tostring(score.quit));
+			core:Debug("name: " .. tostring(name) .. " firstSeen: " .. tostring(score.firstSeen) .. ", lastSeen: " .. tostring(score.lastSeen) .. " playTime: " .. tostring(score.playTime) .. ", quit: " .. tostring(score.quit));
 		end
 		
 		
