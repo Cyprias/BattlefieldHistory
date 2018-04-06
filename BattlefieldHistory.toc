@@ -1,6 +1,6 @@
 ## Interface: 50400
 ## Title: Battlefield History
-## Version: 1.1.180330
+## Version: 1.1.180406
 ## Notes: Player battlefield stats
 ## Author: Cyprias
 ## SavedVariables: BattlefieldHistory_DB

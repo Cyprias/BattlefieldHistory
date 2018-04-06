@@ -206,9 +206,7 @@ do
 	local IsActiveBattlefieldArena = IsActiveBattlefieldArena;
 	local GetBattlefieldWinner = GetBattlefieldWinner;
 	local GetBattlefieldInstanceRunTime = GetBattlefieldInstanceRunTime;
-	
-	local roundScores;
-	
+
 	local function onScores(params)
 		core:Debug("<ProcessBattlefieldStatusChange|onScores>");
 		
@@ -221,15 +219,11 @@ do
 		local runtime = forward.runtime;
 
 		core.Debug("ProcessBattlefieldStatusChange", "battlefieldWinner: " .. tostring(battlefieldWinner) .. ", inArena: " .. tostring(inArena));
-		
+
 		if ( not inArena and battlefieldWinner ) then
 
-			-- Check if anyone quit before end of the round.
-			local scores = core:GetBattlefieldScores();
-			for name, score in pairs(roundScores) do
-				roundScores[name].quit = (type(scores[ name ]) == "nil");
-			end
 			
+
 			--local scores = core:GetBattlefieldScores();
 			-- Pass it to save function.
 			core:RecordBattlefieldScores({
@@ -277,8 +271,11 @@ do
 		roundScores = roundScores or {};
 		local scores = core:GetBattlefieldScores();
 		local playerCount = 0;
+		local myFaction;
+		
 		for name, score in pairs(scores) do
 			roundScores[ name ] = roundScores[ name ] or {};
+
 			for k, v in pairs(score) do
 				roundScores[ name ][k] = v;
 			end
@@ -286,7 +283,30 @@ do
 			roundScores[ name ].lastSeen = GetTime();
 			
 			playerCount = playerCount + 1;
+			
+			if (name == UnitName("player")) then
+				myFaction = score.faction;
+			end
 		end
+		
+		-- Check for players that have quit.
+		local quitNames = {};
+		for name, score in pairs(roundScores) do
+			if (type(scores[ name ]) == "nil") then
+				if (roundScores[name].quit ~= true and roundScores[name].faction ~= myFaction) then
+					table.insert(quitNames, name)
+				end
+				roundScores[name].quit = true;
+			end
+		end
+		
+		core:Debug("quitNames: " .. table.getn(quitNames));
+		
+		-- Check if anyone quit before end of the round.
+		if (table.getn(quitNames) > 0)  then
+			core.echo(table.concat(quitNames, ",") .. " left the battleground.");
+		end
+		
 		core:Debug("playerCount: " .. playerCount);
 	end
 	
@@ -690,6 +710,8 @@ do
 		end
 	end
 	
+	
+	
 	local battlefieldTableData;
 	function DrawBattlefieldContainer( params )
 		local container = params.container;
@@ -699,6 +721,10 @@ do
 			container.battlefieldST.frame:SetPoint("BOTTOMLEFT",window, 10,10)
 			container.battlefieldST.frame:SetPoint("TOP", window, 0, -60)
 			container.battlefieldST.frame:SetPoint("RIGHT", window, -10,0)
+			
+			container.battlefieldST:RegisterEvents({
+				["OnClick"] = cellOnClick
+			});
 			
 			--core.echo("Created allST: " .. tostring(container.allST));
 		end
